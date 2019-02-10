@@ -13,9 +13,10 @@
 
 ## Supported chips
 
-* `MPU9250` -- `Imu` and `Marg`;
-* `MPU9255` -- `Imu` and `Marg`;
-* `MPU6500` -- `Imu` only.
+* `MPU9250` -- `Imu` and `Marg`
+* `MPU9255` -- `Imu` and `Marg`
+* `MPU6500` -- `Imu` only
+* `MPU6050` -- `Imu` only
 
 ### Notes
 
@@ -32,7 +33,7 @@ Include [library](https://crates.io/crates/mpu9250) as a dependency in your Carg
 version = "<version>"
 ```
 
-Use embedded-hal implementation to get SPI, NCS, and delay, then create mpu handle:
+Use embedded-hal implementation to get SPI, NCS, (or I2C) and delay, then create mpu handle:
 
 ```rust
 extern crate mpu9250; // or just use mpu9250; if 2018 edition is used.

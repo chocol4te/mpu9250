@@ -22,9 +22,11 @@
 //! let all = mpu.all()?;
 //! println!("{:?}", all);
 //! // One can also use conf module to supply configuration:
-//! let mut mpu = Mpu9250::marg(spi, ncs, &mut delay,
-//!                             MpuConfig::marg()
-//!                                .mag_scale(conf::MagScale::_14BITS))?;
+//! let mut mpu =
+//!     Mpu9250::marg(spi,
+//!                   ncs,
+//!                   &mut delay,
+//!                   MpuConfig::marg().mag_scale(conf::MagScale::_14BITS))?;
 //! ```
 //!
 //! More examples (for stm32) in [Proving ground] repo.
@@ -48,9 +50,8 @@
 //! [4]: https://github.com/copterust/proving-ground
 
 #![deny(missing_docs)]
-#![deny(warnings)]
+//#![deny(warnings)]
 #![no_std]
-
 
 extern crate cast;
 extern crate embedded_hal as hal;
@@ -58,11 +59,10 @@ extern crate generic_array;
 extern crate nalgebra;
 
 mod ak8963;
-mod types;
 mod conf;
+mod types;
 
 use core::marker::PhantomData;
-use core::mem;
 
 use cast::{f32, i32, u16};
 use generic_array::typenum::consts::*;
@@ -71,8 +71,6 @@ use nalgebra::convert;
 pub use nalgebra::Vector3;
 
 use hal::blocking::delay::DelayMs;
-use hal::blocking::spi;
-use hal::digital::OutputPin;
 use hal::spi::{Mode, Phase, Polarity};
 
 pub use conf::*;
@@ -86,6 +84,8 @@ pub enum MpuXDevice {
     MPU9255 = 0x73,
     /// MPU 6500
     MPU6500 = 0x70,
+    /// MPU 6050
+    MPU6050 = 0x68,
 }
 
 impl MpuXDevice {
@@ -101,10 +101,9 @@ impl MpuXDevice {
 }
 
 /// MPU9250 driver
-pub struct Mpu9250<SPI, NCS, MODE> {
-    // connections
-    spi: SPI,
-    ncs: NCS,
+pub struct Mpu9250<INTERFACE, MODE, E> {
+    // SPI or I2C interface
+    interface: INTERFACE,
     // data; factory defaults.
     mag_sensitivity_adjustments: Vector3<f32>,
     raw_mag_sensitivity_adjustments: Vector3<u8>,
@@ -117,6 +116,8 @@ pub struct Mpu9250<SPI, NCS, MODE> {
     sample_rate_divisor: Option<u8>,
     // mode
     _mode: PhantomData<MODE>,
+    // error
+    _error: PhantomData<E>,
 }
 
 /// MPU Error
@@ -148,44 +149,39 @@ const TEMP_SENSITIVITY: f32 = 333.87;
 const TEMP_DIFF: f32 = 21.0;
 const TEMP_ROOM_OFFSET: f32 = 0.0;
 
-impl<E, SPI, NCS> Mpu9250<SPI, NCS, Imu>
-    where SPI: spi::Write<u8, Error = E> + spi::Transfer<u8, Error = E>,
-          NCS: OutputPin
-{
+impl<E, I: types::Interface<E>> Mpu9250<I, Imu, E> {
     /// Creates a new [`Imu`] driver from a SPI peripheral and a NCS pin
     /// with default configuration.
-    pub fn imu_default<D>(spi: SPI,
-                          ncs: NCS,
-                          delay: &mut D)
-                          -> Result<Self, Error<E>>
+    pub fn imu_default<D>(interface: I, delay: &mut D) -> Result<Self, Error<E>>
         where D: DelayMs<u8>
     {
-        Mpu9250::imu(spi, ncs, delay, &mut MpuConfig::imu())
+        Mpu9250::imu(interface, delay, &mut MpuConfig::imu())
     }
 
     /// Creates a new Imu driver from a SPI peripheral and a NCS pin with
     /// provided configuration [`Config`].
     ///
     /// [`Config`]: ./conf/struct.MpuConfig.html
-    pub fn imu<D>(spi: SPI,
-                  ncs: NCS,
+    pub fn imu<D>(interface: I,
                   delay: &mut D,
                   config: &mut MpuConfig<Imu>)
                   -> Result<Self, Error<E>>
         where D: DelayMs<u8>
     {
         let mut mpu9250 =
-            Mpu9250 { spi,
-                      ncs,
+            Mpu9250 { interface,
                       raw_mag_sensitivity_adjustments: Vector3::zeros(),
                       mag_sensitivity_adjustments: Vector3::zeros(),
                       gyro_scale: config.gyro_scale.unwrap_or_default(),
                       accel_scale: config.accel_scale.unwrap_or_default(),
                       mag_scale: MagScale::default(),
-                      accel_data_rate: config.accel_data_rate.unwrap_or_default(),
-                      gyro_temp_data_rate: config.gyro_temp_data_rate.unwrap_or_default(),
+                      accel_data_rate: config.accel_data_rate
+                                             .unwrap_or_default(),
+                      gyro_temp_data_rate: config.gyro_temp_data_rate
+                                                 .unwrap_or_default(),
                       sample_rate_divisor: config.sample_rate_divisor,
-                      _mode: PhantomData, };
+                      _mode: PhantomData,
+                      _error: PhantomData };
         mpu9250.init_mpu(delay)?;
         let wai = mpu9250.who_am_i()?;
         if MpuXDevice::imu_supported(wai) {
@@ -200,8 +196,10 @@ impl<E, SPI, NCS> Mpu9250<SPI, NCS, Imu>
         transpose(config.gyro_scale.map(|v| self.gyro_scale(v)))?;
         transpose(config.accel_scale.map(|v| self.accel_scale(v)))?;
         transpose(config.accel_data_rate.map(|v| self.accel_data_rate(v)))?;
-        transpose(config.gyro_temp_data_rate.map(|v| self.gyro_temp_data_rate(v)))?;
-        transpose(config.sample_rate_divisor.map(|v| self.sample_rate_divisor(v)))?;
+        transpose(config.gyro_temp_data_rate
+                        .map(|v| self.gyro_temp_data_rate(v)))?;
+        transpose(config.sample_rate_divisor
+                        .map(|v| self.sample_rate_divisor(v)))?;
 
         Ok(())
     }
@@ -216,7 +214,7 @@ impl<E, SPI, NCS> Mpu9250<SPI, NCS, Imu>
 
         Ok(UnscaledImuMeasurements { accel,
                                      gyro,
-                                     temp, })
+                                     temp })
     }
 
     /// Reads and returns Accelerometer + Gyroscope + Thermometer
@@ -230,52 +228,47 @@ impl<E, SPI, NCS> Mpu9250<SPI, NCS, Imu>
 
         Ok(ImuMeasurements { accel,
                              gyro,
-                             temp, })
+                             temp })
     }
 }
 
-impl<E, SPI, NCS> Mpu9250<SPI, NCS, Marg>
-    where SPI: spi::Write<u8, Error = E> + spi::Transfer<u8, Error = E>,
-          NCS: OutputPin
-{
+impl<E, I: types::Interface<E>> Mpu9250<I, Marg, E> {
     /// Creates a new [`Marg`] driver from a SPI peripheral and a NCS pin with
     /// default [`Config`].
     ///
     /// [`Config`]: ./conf/struct.MpuConfig.html
-    pub fn marg_default<D>(spi: SPI,
-                           ncs: NCS,
+    pub fn marg_default<D>(interface: I,
                            delay: &mut D)
                            -> Result<Self, Error<E>>
         where D: DelayMs<u8>
     {
-        Mpu9250::marg(spi, ncs, delay, &mut MpuConfig::marg())
+        Mpu9250::marg(interface, delay, &mut MpuConfig::marg())
     }
 
     /// Creates a new MARG driver from a SPI peripheral and a NCS pin
     /// with provided configuration [`Config`].
     ///
     /// [`Config`]: ./conf/struct.MpuConfig.html
-    pub fn marg<D>(spi: SPI,
-                   ncs: NCS,
+    pub fn marg<D>(interface: I,
                    delay: &mut D,
                    config: &mut MpuConfig<Marg>)
                    -> Result<Self, Error<E>>
         where D: DelayMs<u8>
     {
-        let mut mpu9250: Mpu9250<SPI, NCS, Marg> =
-            Mpu9250 { spi,
-                      ncs,
+        let mut mpu9250: Mpu9250<I, Marg, E> =
+            Mpu9250 { interface,
                       raw_mag_sensitivity_adjustments: Vector3::zeros(),
                       mag_sensitivity_adjustments: Vector3::zeros(),
                       gyro_scale: config.gyro_scale.unwrap_or_default(),
                       accel_scale: config.accel_scale.unwrap_or_default(),
                       mag_scale: config.mag_scale.unwrap_or_default(),
-                      accel_data_rate:
-                          config.accel_data_rate.unwrap_or_default(),
-                      gyro_temp_data_rate:
-                          config.gyro_temp_data_rate.unwrap_or_default(),
+                      accel_data_rate: config.accel_data_rate
+                                             .unwrap_or_default(),
+                      gyro_temp_data_rate: config.gyro_temp_data_rate
+                                                 .unwrap_or_default(),
                       sample_rate_divisor: config.sample_rate_divisor,
-                      _mode: PhantomData, };
+                      _mode: PhantomData,
+                      _error: PhantomData };
         mpu9250.init_mpu(delay)?;
         let wai = mpu9250.who_am_i()?;
         if MpuXDevice::marg_supported(wai) {
@@ -340,8 +333,10 @@ impl<E, SPI, NCS> Mpu9250<SPI, NCS, Marg>
         transpose(config.accel_scale.map(|v| self.accel_scale(v)))?;
         transpose(config.mag_scale.map(|v| self.mag_scale(v)))?;
         transpose(config.accel_data_rate.map(|v| self.accel_data_rate(v)))?;
-        transpose(config.gyro_temp_data_rate.map(|v| self.gyro_temp_data_rate(v)))?;
-        transpose(config.sample_rate_divisor.map(|v| self.sample_rate_divisor(v)))?;
+        transpose(config.gyro_temp_data_rate
+                        .map(|v| self.gyro_temp_data_rate(v)))?;
+        transpose(config.sample_rate_divisor
+                        .map(|v| self.sample_rate_divisor(v)))?;
 
         Ok(())
     }
@@ -352,14 +347,14 @@ impl<E, SPI, NCS> Mpu9250<SPI, NCS, Marg>
         let buffer = self.read_many::<U21>(Register::ACCEL_XOUT_H)?;
 
         let accel = self.to_vector(buffer, 0);
-        let temp = ((u16(buffer[7]) << 8) | u16(buffer[8])) as i16 ;
+        let temp = ((u16(buffer[7]) << 8) | u16(buffer[8])) as i16;
         let gyro = self.to_vector(buffer, 8);
         let mag = self.to_vector_inverted(buffer, 14);
 
         Ok(UnscaledMargMeasurements { accel,
                                       gyro,
                                       temp,
-                                      mag, })
+                                      mag })
     }
 
     /// Reads and returns Accelerometer + Gyroscope + Thermometer + Magnetometer
@@ -375,7 +370,7 @@ impl<E, SPI, NCS> Mpu9250<SPI, NCS, Marg>
         Ok(MargMeasurements { accel,
                               gyro,
                               temp,
-                              mag, })
+                              mag })
     }
 
     fn scale_and_correct_mag<N>(&self,
@@ -445,10 +440,7 @@ impl<E, SPI, NCS> Mpu9250<SPI, NCS, Marg>
     }
 }
 
-impl<E, SPI, NCS, MODE> Mpu9250<SPI, NCS, MODE>
-    where SPI: spi::Write<u8, Error = E> + spi::Transfer<u8, Error = E>,
-          NCS: OutputPin
-{
+impl<E, I: types::Interface<E>, MODE> Mpu9250<I, MODE, E> {
     fn init_mpu<D>(&mut self, delay: &mut D) -> Result<(), E>
         where D: DelayMs<u8>
     {
@@ -551,7 +543,7 @@ impl<E, SPI, NCS, MODE> Mpu9250<SPI, NCS, MODE>
     /// [`AccelDataRate`]: ./conf/enum.AccelDataRate.html
     pub fn accel_data_rate(&mut self,
                            accel_data_rate: AccelDataRate)
-                        -> Result<(), E> {
+                           -> Result<(), E> {
         self.accel_data_rate = accel_data_rate;
         self._accel_data_rate()
     }
@@ -586,8 +578,8 @@ impl<E, SPI, NCS, MODE> Mpu9250<SPI, NCS, MODE>
     ///
     /// [`GyroTempDataRate`]: ./conf/enum.GyroTempDataRate.html
     pub fn gyro_temp_data_rate(&mut self,
-                            data_rate: GyroTempDataRate)
-                            -> Result<(), E> {
+                               data_rate: GyroTempDataRate)
+                               -> Result<(), E> {
         self.gyro_temp_data_rate = data_rate;
         self._gyro_temp_data_rate()
     }
@@ -666,7 +658,7 @@ impl<E, SPI, NCS, MODE> Mpu9250<SPI, NCS, MODE>
     pub fn calibrate_at_rest<D>(&mut self,
                                 delay: &mut D)
                                 -> Result<Vector3<f32>, Error<E>>
-    where D: DelayMs<u8>
+        where D: DelayMs<u8>
     {
         // First save current values, as we reset them below
         let orig_gyro_scale = self.gyro_scale;
@@ -730,7 +722,7 @@ impl<E, SPI, NCS, MODE> Mpu9250<SPI, NCS, MODE>
         // How many sets of full gyro and accelerometer data for averaging
         let packet_count = i32(fifo_count / 12);
         if packet_count < 20 {
-            return Err(Error::CalibrationError)
+            return Err(Error::CalibrationError);
         }
         let mut accel_biases: Vector3<i32> = Vector3::zeros();
         let mut gyro_biases: Vector3<i32> = Vector3::zeros();
@@ -805,9 +797,9 @@ impl<E, SPI, NCS, MODE> Mpu9250<SPI, NCS, MODE>
                      as i16)
     }
 
-    /// Destroys the driver recovering the SPI peripheral and the NCS pin
-    pub fn release(self) -> (SPI, NCS) {
-        (self.spi, self.ncs)
+    /// Destroys the driver recovering the interface
+    pub fn release(self) -> I {
+        self.interface
     }
 
     /// Reads the WHO_AM_I register; should return `0x71`
@@ -861,27 +853,15 @@ impl<E, SPI, NCS, MODE> Mpu9250<SPI, NCS, MODE>
     fn read_many<N>(&mut self, reg: Register) -> Result<GenericArray<u8, N>, E>
         where N: ArrayLength<u8>
     {
-        let mut buffer: GenericArray<u8, N> = unsafe { mem::zeroed() };
-        {
-            let slice: &mut [u8] = &mut buffer;
-            slice[0] = reg.read_address();
-            self.ncs.set_low();
-            self.spi.transfer(slice)?;
-            self.ncs.set_high();
-        }
-
-        Ok(buffer)
+        self.interface.read_many(reg)
     }
 
     fn write(&mut self, reg: Register, val: u8) -> Result<(), E> {
-        self.ncs.set_low();
-        self.spi.write(&[reg.write_address(), val])?;
-        self.ncs.set_high();
-        Ok(())
+        self.interface.write(reg, val)
     }
 }
 
-impl<SPI, NCS, MODE> Mpu9250<SPI, NCS, MODE> {
+impl<I, MODE, E> Mpu9250<I, MODE, E> {
     /// Returns Accelerometer resolution.
     pub fn accel_resolution(&self) -> f32 {
         self.accel_scale.resolution()
@@ -900,12 +880,13 @@ impl<SPI, NCS, MODE> Mpu9250<SPI, NCS, MODE> {
 
 /// SPI mode
 pub const MODE: Mode = Mode { polarity: Polarity::IdleHigh,
-                              phase: Phase::CaptureOnSecondTransition, };
+                              phase: Phase::CaptureOnSecondTransition };
 
 #[allow(dead_code)]
+#[allow(missing_docs)]
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy)]
-enum Register {
+pub enum Register {
     ACCEL_CONFIG = 0x1c,
     ACCEL_CONFIG_2 = 0x1d,
     ACCEL_XOUT_H = 0x3b,
@@ -1017,9 +998,9 @@ pub struct MargMeasurements {
 }
 
 fn transpose<T, E>(o: Option<Result<T, E>>) -> Result<Option<T>, E> {
-        match o {
-            Some(Ok(x)) => Ok(Some(x)),
-            Some(Err(e)) => Err(e),
-            None => Ok(None),
-        }
+    match o {
+        Some(Ok(x)) => Ok(Some(x)),
+        Some(Err(e)) => Err(e),
+        None => Ok(None),
+    }
 }

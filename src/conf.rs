@@ -224,16 +224,13 @@ impl MpuConfig<types::Imu> {
     /// [`AccelDataRate`]: ./enum.AccelDataRate.html
     /// [`GyroTempDataRate`]: ./enum.GyroTempDataRate.html
     pub fn imu() -> Self {
-        MpuConfig {
-            gyro_scale: None,
-            accel_scale: None,
-            mag_scale: None,
-            accel_data_rate: None,
-            gyro_temp_data_rate: None,
-            sample_rate_divisor: None,
-            _mode: PhantomData
-        }
-
+        MpuConfig { gyro_scale: None,
+                    accel_scale: None,
+                    mag_scale: None,
+                    accel_data_rate: None,
+                    gyro_temp_data_rate: None,
+                    sample_rate_divisor: None,
+                    _mode: PhantomData }
     }
 }
 
@@ -250,16 +247,13 @@ impl MpuConfig<types::Marg> {
     /// [`AccelDataRate`]: ./enum.AccelDataRate.html
     /// [`GyroTempDataRate`]: ./enum.GyroTempDataRate.html
     pub fn marg() -> Self {
-        MpuConfig {
-            gyro_scale: None,
-            accel_scale: None,
-            mag_scale: None,
-            accel_data_rate: None,
-            gyro_temp_data_rate: None,
-            sample_rate_divisor: None,
-            _mode: PhantomData
-        }
-
+        MpuConfig { gyro_scale: None,
+                    accel_scale: None,
+                    mag_scale: None,
+                    accel_data_rate: None,
+                    gyro_temp_data_rate: None,
+                    sample_rate_divisor: None,
+                    _mode: PhantomData }
     }
 }
 
@@ -283,8 +277,7 @@ impl<MODE> MpuConfig<MODE> {
     /// Sets accelerometer data rate config ([`AccelDataRate`]).
     ///
     /// [`AccelDataRate`]: ./conf/enum.AccelDataRate.html
-    pub fn accel_data_rate(&mut self, data_rate: AccelDataRate)
-                           -> &mut Self {
+    pub fn accel_data_rate(&mut self, data_rate: AccelDataRate) -> &mut Self {
         self.accel_data_rate = Some(data_rate);
         self
     }
